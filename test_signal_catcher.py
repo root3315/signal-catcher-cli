@@ -5,12 +5,13 @@ import io
 import json
 import os
 import signal
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from signal_catcher import SignalCatcher, SIGNAL_MAP
+from signal_catcher import SignalCatcher, SIGNAL_MAP, DEFAULT_COMMAND_TIMEOUT
 
 
 class TestSignalCatcherInit(unittest.TestCase):
@@ -22,6 +23,7 @@ class TestSignalCatcherInit(unittest.TestCase):
         self.assertTrue(catcher.running)
         self.assertFalse(catcher.verbose)
         self.assertIsNone(catcher.log_file)
+        self.assertEqual(catcher.command_timeout, DEFAULT_COMMAND_TIMEOUT)
 
     def test_init_custom_config(self):
         custom_path = Path("/tmp/custom_config.json")
@@ -47,6 +49,7 @@ class TestSignalCatcherConfig(unittest.TestCase):
             "handlers": {"15": ["echo test"]},
             "log_file": "/tmp/signals.log",
             "verbose": True,
+            "command_timeout": 60,
         }
         with open(self.config_file, "w") as f:
             json.dump(config_data, f)
@@ -58,6 +61,20 @@ class TestSignalCatcherConfig(unittest.TestCase):
         self.assertEqual(catcher.handlers, {15: ["echo test"]})
         self.assertEqual(catcher.log_file, Path("/tmp/signals.log"))
         self.assertTrue(catcher.verbose)
+        self.assertEqual(catcher.command_timeout, 60)
+
+    def test_load_config_default_timeout(self):
+        config_data = {
+            "handlers": {"15": ["echo test"]},
+        }
+        with open(self.config_file, "w") as f:
+            json.dump(config_data, f)
+
+        catcher = SignalCatcher(config_file=self.config_file)
+        result = catcher.load_config()
+
+        self.assertTrue(result)
+        self.assertEqual(catcher.command_timeout, DEFAULT_COMMAND_TIMEOUT)
 
     def test_load_config_invalid_json(self):
         with open(self.config_file, "w") as f:
@@ -73,6 +90,7 @@ class TestSignalCatcherConfig(unittest.TestCase):
         catcher.handlers = {signal.SIGTERM: ["echo test"]}
         catcher.log_file = Path("/tmp/test.log")
         catcher.verbose = True
+        catcher.command_timeout = 45
 
         result = catcher.save_config()
         self.assertTrue(result)
@@ -87,6 +105,7 @@ class TestSignalCatcherConfig(unittest.TestCase):
         )
         self.assertEqual(saved_config["log_file"], "/tmp/test.log")
         self.assertTrue(saved_config["verbose"])
+        self.assertEqual(saved_config["command_timeout"], 45)
 
     def test_save_config_io_error(self):
         invalid_path = Path("/proc/nonexistent/config.json")
@@ -279,13 +298,26 @@ class TestSignalCatcherHandleSignal(unittest.TestCase):
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             catcher.handle_signal(signal.SIGUSR1, None)
             mock_run.assert_called_once()
+            call_kwargs = mock_run.call_args[1]
+            self.assertEqual(call_kwargs["timeout"], DEFAULT_COMMAND_TIMEOUT)
+
+    def test_handle_signal_custom_timeout(self):
+        catcher = SignalCatcher()
+        catcher.command_timeout = 120
+        catcher.register_handler(signal.SIGUSR1, "echo executed")
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            catcher.handle_signal(signal.SIGUSR1, None)
+            call_kwargs = mock_run.call_args[1]
+            self.assertEqual(call_kwargs["timeout"], 120)
 
     def test_handle_signal_command_timeout(self):
         catcher = SignalCatcher()
         catcher.register_handler(signal.SIGUSR1, "sleep 100")
         catcher.verbose = True
 
-        with patch("subprocess.run", side_effect=Exception("Timeout")):
+        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="sleep 100", timeout=30)):
             with patch("sys.stderr", new_callable=io.StringIO):
                 catcher.handle_signal(signal.SIGUSR1, None)
 
