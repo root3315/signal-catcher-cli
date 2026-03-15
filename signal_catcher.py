@@ -19,6 +19,7 @@ from typing import Dict, List, Optional, Callable
 
 DEFAULT_CONFIG_DIR = Path.home() / ".signal-catcher"
 DEFAULT_CONFIG_FILE = DEFAULT_CONFIG_DIR / "config.json"
+DEFAULT_COMMAND_TIMEOUT = 30
 
 SIGNAL_MAP = {
     "SIGHUP": signal.SIGHUP,
@@ -60,6 +61,7 @@ class SignalCatcher:
         self.running = True
         self.verbose = False
         self.log_file: Optional[Path] = None
+        self.command_timeout: int = DEFAULT_COMMAND_TIMEOUT
 
     def load_config(self) -> bool:
         if not self.config_file.exists():
@@ -72,6 +74,7 @@ class SignalCatcher:
             if log_path:
                 self.log_file = Path(log_path)
             self.verbose = config.get("verbose", False)
+            self.command_timeout = config.get("command_timeout", DEFAULT_COMMAND_TIMEOUT)
             return True
         except (json.JSONDecodeError, IOError) as e:
             print(f"Error loading config: {e}", file=sys.stderr)
@@ -84,6 +87,7 @@ class SignalCatcher:
                 "handlers": {str(k): v for k, v in self.handlers.items()},
                 "log_file": str(self.log_file) if self.log_file else None,
                 "verbose": self.verbose,
+                "command_timeout": self.command_timeout,
             }
             with open(self.config_file, "w") as f:
                 json.dump(config, f, indent=2)
@@ -153,7 +157,7 @@ class SignalCatcher:
                         shell=True,
                         capture_output=True,
                         text=True,
-                        timeout=30,
+                        timeout=self.command_timeout,
                     )
                     if self.verbose and result.stdout:
                         print(result.stdout, file=sys.stderr)
@@ -212,6 +216,7 @@ Examples:
   %(prog)s register SIGTERM "echo 'Received TERM'"
   %(prog)s register SIGUSR1 "/path/to/script.sh"
   %(prog)s listen --duration 60
+  %(prog)s listen --timeout 60
   %(prog)s list
   %(prog)s remove SIGTERM
         """
@@ -231,6 +236,7 @@ Examples:
     listen_parser.add_argument("-d", "--duration", type=int, help="Duration in seconds")
     listen_parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
     listen_parser.add_argument("-l", "--log-file", type=Path, help="Log file path")
+    listen_parser.add_argument("-t", "--timeout", type=int, help="Command timeout in seconds")
 
     list_parser = subparsers.add_parser("list", help="List registered handlers")
 
@@ -274,6 +280,8 @@ Examples:
             catcher.verbose = True
         if hasattr(args, "log_file") and args.log_file:
             catcher.log_file = args.log_file
+        if hasattr(args, "timeout") and args.timeout is not None:
+            catcher.command_timeout = args.timeout
         catcher.run(duration=args.duration)
 
     elif args.command == "list":

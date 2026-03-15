@@ -57,6 +57,7 @@ python signal_catcher.py listen                    # Run forever
 python signal_catcher.py listen -d 60              # Run for 60 seconds
 python signal_catcher.py listen -v                 # Verbose mode
 python signal_catcher.py listen -l /var/log/signals.json
+python signal_catcher.py listen -t 60              # Set command timeout to 60 seconds
 ```
 
 ### list
@@ -86,7 +87,8 @@ Handlers are stored in `~/.signal-catcher/config.json`. It's just JSON, so you c
     "10": ["/home/user/scripts/cleanup.sh"]
   },
   "verbose": false,
-  "log_file": null
+  "log_file": null,
+  "command_timeout": 30
 }
 ```
 
@@ -103,7 +105,7 @@ Use `-l` or `--log-file` to log all caught signals to a file. Each entry is a JS
 
 ## Notes
 
-- Commands timeout after 30 seconds
+- Commands timeout after 30 seconds by default (configurable via `-t` flag or `command_timeout` in config)
 - Multiple commands can be registered for the same signal
 - SIGKILL and SIGSTOP cannot be caught (that's just how Unix works)
 - Runs in foreground, so stick it in a screen/tmux session or systemd service
